@@ -2,111 +2,74 @@
 #Author: MirandaLv
 #Note: Using fiona to do spatial scrub
 
-
-"""
-
-***The input tsv file must have a filed called "country_code" that has TWO Character ABBREVIATION***
-***The input shape file mast have a filed called "ISO_A2" that has TWO Character ABBREVIATION***
-Inputs: 
-	argument: tsv file, lat, lon, shapefile > output file name
-Outputs:
-	geojson file includes points that are outside administration boundary
-
-In1: /home/mirandalv/Documents/QA-tool/qa_python/scrub-input/tsv-test.tsv
-In2: latitude's head name in csv
-In3: longitude's head name in csv
-In4: /home/mirandalv/Documents/QA-tool/qa_python/scrub-input/country-codes-id-fixed.shp
-"""
-
-
 import csv, sys, getopt, os
 from shapely.geometry import Point, shape
-import timeit, locale
-import fiona, warnings
+import locale
+import warnings, fiona
+import pandas as pd
+from pandas import DataFrame as df
 
-
+#-------------------------------------input arguements from terminal---------------------------#
+"""
 opts, args= getopt.getopt(sys.argv[1:], "ho:v", ["help", "output="]) #Need to polish the inputs later
 inp1_csv=args[0]
 lat=args[1]
 lon=args[2]
-inp4_shp=args[3]
+location_type_code=args[3] #ADM1, ADM2, PPL
+type_code=args[4]
+geoname_adm_code=args[5] #NL|AL|....
+inp4_shp=args[6]
+ADM_shp=args[7]
+"""
+#----------------------------------------test arguements----------------------------------------#
 
+inp1_csv="/home/mirandalv/Documents/QA-tool/qa_python/Timor-Leste/locations.tsv"
+lat="latitude"
+lon="longitude"
+location_type_code="location_type_code"
+type_code=1
+geoname_adm_code="geoname_adm_code" #NL|AL|....
+inp4_shp="/home/mirandalv/Documents/QA-tool/qa_python/Timor-Leste/TL_ADM1.shp"
+ADM_shp="ADM1_NM_AB"
+
+#-------------------------------------Get geomerty of shapefile---------------------------------#
 #get all layers' geometry of input polygon, output as a dictionary
 def getgeomerty(shp):
 	with fiona.open(shp, 'r') as infile:
 		dic={}
-		for i in range(0,len(infile)-1):
+		for i in range(0,len(infile)):
 			geometry=infile[i]["geometry"]
-			country=infile[i]["properties"]["ISO_A2"] #"SOV_A3" could be an input argument
+			country=infile[i]["properties"][ADM_shp] #"SOV_A3" could be an input argument
 			dic[country]=geometry
 		return dic
 
 
 geom=getgeomerty(inp4_shp)
 
-
+#-----------------------------------read and write a dataframe------------------------------------------#
 # Read in raw data from csv
 rawData = csv.DictReader(open(inp1_csv, 'rb'), delimiter='\t')
-
-	
-# the template. where data from the csv will be formatted to geojson
-template = \
-    ''' \
-	{ 
-		"type" : "Feature",
-        "properties" : {
-			"project_id": %s, 
-			"linenumber" : "%s"
-			},
-        "geometry" : {
-             "type" : "Point",
-             "coordinates" : [%f,%f]
-             }
-	},
-    '''
-    
-
-
-# the head of the geojson file
-output = \
-    ''' \
-{ 
-	"type" : "FeatureCollection",
-	"features" : [
-    '''
-
-
-
-# loop through the csv by row skipping the first header
-iter = 0
-
-for row in rawData:
-    iter += 1
-    if iter >= 1:
-		adm_name=row["country_code"]
-		if row[lon]=="" or row[lat]=="":
-			warningstring='WARN: ' + row["project_id"] + " does not have latitude/longitude"
-			warnings.warn(warningstring)
+head=rawData.fieldnames
+indictlist=[]
+rownum=1
+for utf8_row in rawData:
+	row=dict([(key, unicode(value, 'utf-8')) for key, value in utf8_row.iteritems()])
+	rownum+=1
+	if row[lon]=="" or row[lat]=="":
+		warningstring='WARN: ROW ' + str(rownum) + " in the input tsv file does not have latitude/longitude"
+		warnings.warn(warningstring)
+	if row[location_type_code].lower()=="adm" + str(type_code):
+		adm_code=row[geoname_adm_code].rsplit("|")[type_code]
 		if row[lon]!="" and row[lat]!="": 
-			#print row["project_id"], iter+1
-			pointX = locale.atof(row[lon]) #make sure coordinates are not string
+			pointX = locale.atof(row[lon])  #make sure coordinates are not string
 			pointY = locale.atof(row[lat])
 			thePoint=Point(pointX, pointY)
-			#name = row["title"]
-			if not shape(geom[adm_name]).contains(thePoint)==True:
-				output += template % (row["project_id"], iter+1, pointX, pointY)
+			if not shape(geom[adm_code]).contains(thePoint)==True:
+				indictlist.append(row)
 
-
-output=output[:-6]
-
-    
-# the tail of the geojson file
-output+=\
-    ''' \
-	]
-}
-    '''
-
-print output
-
+#----------------------------------output dataframe------------------------------------------------#
+#outdf=df(columns=head) #create a new blank dataframe
+outdf=df(indictlist, columns=head)
+print outdf
+#outdf.to_csv('/home/mirandalv/Desktop/Honduras_spatial_scrub_output.tsv', index_label='ROW_NUM', sep='\t', quotechar='\"')
 
